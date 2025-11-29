@@ -19,7 +19,7 @@ def load_rows(path=DATA_PATH):
             rows.append({
                 'date': r['date'],
                 'participant_id': r['participant_id'],
-                'condition': r['condition'],  # BUG: not normalized here
+                'condition': normalize_condition(r['condition']),  # fixed: normalize case/spacing,  # BUG: not normalized here
                 'trials': int(r['trials']),
                 'correct': int(r['correct']),
                 'rt': r['rt'],
@@ -33,22 +33,30 @@ def summarize_by_condition(rows):
     # BUGS:
     # - doesn't normalize condition labels
     # - averages per-row accuracy and RT instead of weighting by net_trials
+    from collections import defaultdict
+    sums = defaultdict(lambda: {'nt': 0, 'nc': 0, 'wrt': 0.0})
     acc = defaultdict(list)
     rts = defaultdict(list)
     nts = defaultdict(int)
+    weights = defaultdict(list)
 
     for r in rows:
-        cm = compute_row_metrics(r['trials'], r['correct'], r['rt'], r['dropout'], r['exclusions'])
-        key = r['condition']  # <-- BUG: should be normalize_condition(r['condition'])
+        cm = compute_row_metrics(
+    r['trials'], r['correct'], r['rt'], r['dropout'], r['exclusions']
+)
+
+        key = normalize_condition(r['condition'])  # <-- BUG: should be normalize_condition(r['condition'])
         if cm['net_trials'] > 0:
             acc[key].append(cm['net_correct'] / cm['net_trials'])
             rts[key].append(cm['rt_ms'])
             nts[key] += cm['net_trials']
+            weights[key].append(cm['net_trials'])
 
     out = {}
     for k in acc:
-        mean_acc = sum(acc[k]) / len(acc[k]) if acc[k] else 0.0  # <-- BUG: not weighted by trials
-        mean_rt  = sum(rts[k]) / len(rts[k]) if rts[k] else 0.0  # <-- BUG: not weighted by trials
+        w_sum = sum(weights[k])
+        mean_acc = (sum(a * w for a, w in zip(acc[k], weights[k])) / w_sum) if w_sum else 0.0  # <-- BUG: not weighted by trials
+        mean_rt  = (sum(rt * w for rt, w in zip(rts[k], weights[k])) / w_sum) if w_sum else 0.0  # <-- BUG: not weighted by trials
         out[k] = {'net_trials': nts[k], 'accuracy': mean_acc, 'mean_rt_ms': mean_rt}
     return out
 
@@ -57,7 +65,9 @@ def summarize_by_day(rows):
     # Day summary uses sums (closer to correct), but still depends on buggy helpers.
     sums = defaultdict(lambda: {'nt': 0, 'nc': 0, 'wrt': 0.0})
     for r in rows:
-        cm = compute_row_metrics(r['trials'], r['correct'], r['rt'], r['dropout'], r['exclusions'])
+        cm = compute_row_metrics(
+        r['trials'], r['correct'], r['rt'], r['dropout'], r['exclusions']
+    )
         if cm['net_trials'] > 0:
             sums[r['date']]['nt'] += cm['net_trials']
             sums[r['date']]['nc'] += cm['net_correct']

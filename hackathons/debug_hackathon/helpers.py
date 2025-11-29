@@ -8,7 +8,9 @@ def parse_percent(text: str) -> float:
     if not t:
         return 0.0
     try:
-        return float(t.strip('%')) / 100.0   # <-- BUG: only divide when '%' present
+        if '%' in t:   # <-- BUG: only divide when '%' present
+            return float(t.replace('%', '').strip()) / 100.0
+        return float(t)
     except ValueError:
         return 0.0
 
@@ -25,21 +27,23 @@ def parse_time_ms(text: str) -> float:
     except ValueError:
         return 0.0
     # Wrong: unconditionally interpret as seconds
-    return val * 1000 if t.endswith('s') else val / 1000  # <-- BUG: should not divide for 'ms'
+    return val * 1000 if (t.endswith('s') and not t.endswith('ms')) else val  # <-- BUG: should not divide for 'ms'
 
 
 def normalize_condition(name: str) -> str:
     """Normalize ' condition ' -> 'Condition'; 'TREATMENT' -> 'Treatment'
     BUG: only stripping; no case normalization or internal space collapse.
     """
-    return (name or '').strip()  # <-- BUG: should also standardize spacing/case (e.g., title())
+
+    return ' '.join((name or '').strip().split()).title()
+  # <-- BUG: should also standardize spacing/case (e.g., title())
 
 
 def net_trials(trials: int, exclusions: int, dropout_frac: float) -> int:
     """Compute net trials: max(trials - exclusions - floor(trials*dropout), 0)
     BUG: subtracts dropout fraction itself (tiny), may go negative, and doesn't clamp.
     """
-    return trials - exclusions - int(dropout_frac)  # <-- BUG: should be int(trials*dropout_frac), clamp >=0
+    return max(trials - exclusions - int(trials * dropout_frac), 0)  # <-- BUG: should be int(trials*dropout_frac), clamp >=0
 
 
 def compute_row_metrics(trials: int, correct: int, rt_text: str, dropout_text: str, exclusions: int):
@@ -50,6 +54,8 @@ def compute_row_metrics(trials: int, correct: int, rt_text: str, dropout_text: s
     frac = parse_percent(dropout_text)
     rt_ms = parse_time_ms(rt_text)
     # Wrong: subtract from correct, not from trials; and no clamping/cap
-    net_correct = max(correct - exclusions - int(trials * frac), 0)   # <-- BUG
-    net_trials_val = trials  # <-- BUG: ignores dropout/exclusions
+    net_trials_val = net_trials(trials, exclusions, frac)   # <-- BUG
+    net_correct = min(max(correct, 0), net_trials_val)  # <-- BUG: ignores dropout/exclusions
     return {'net_trials': net_trials_val, 'net_correct': net_correct, 'rt_ms': rt_ms}
+
+
